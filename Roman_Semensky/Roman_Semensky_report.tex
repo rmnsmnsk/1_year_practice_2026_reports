@@ -1,0 +1,194 @@
+% Данный файл распространяетсяя под лицензией CC BY 4.0. Текст лицензии размещён на https://creativecommons.org/licenses/by/4.0/
+% (c) Кафедра системного программирования, 2025
+
+\documentclass[a4paper]{article}
+
+\usepackage[a4paper, top=8mm, bottom=8mm, left=8mm, right=8mm]{geometry}
+
+\usepackage{polyglossia}
+\setdefaultlanguage[babelshorthands=true]{russian}
+\setotherlanguage{english}
+
+\usepackage{fontspec}
+\setmainfont{FreeSerif}
+\newfontfamily{\russianfonttt}[Scale=0.7]{DejaVuSansMono}
+
+\usepackage[tiny, compact]{titlesec}
+
+\usepackage{titling}
+\setlength{\droptitle}{-1cm}
+\pretitle{\begin{center}\begin{bfseries}\Large}
+\posttitle{\par\end{bfseries}\end{center}}
+\preauthor{\begin{center}\normalsize}
+\postauthor{\par\end{center}\vspace{-1.8cm}}
+
+\usepackage{hyperref}
+\usepackage{bookmark}
+\usepackage{csquotes}
+\usepackage{pdfpages}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{siunitx}
+
+\title{Реализация примитивов разреженной линейной алгебры: сравнительный анализ производительности}
+
+\author{Семенский Роман Николаевич}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{flushright}
+    Группа: \emph{25.Б42-мм}
+
+    Кафедра: \emph{Системного программирования}
+
+    Научный руководитель: \emph{доцент кафедры системного программирования, кандидат физико-математических наук Григорьев Семён Вячеславович}
+
+    Номер семестра практики: \emph{2}
+\end{flushright}
+
+
+\section{Постановка задачи}
+
+Работа выполняется в рамках учебного проекта кафедры системного программирования.
+
+\textbf{Целью работы является} сравнительный анализ производительности двух подходов к хранению и обработке разреженных матриц: собственной реализации на языке C с использованием формата COO (Coordinate List) и эталонной реализации на языке F\# с использованием иерархической структуры QuadTree (библиотека \texttt{QTreeFSharp}\footnote{URL: \url{https://github.com/Lamagraph/QTreeFSharp} (дата обращения: май 2026)}).
+
+Результаты работы необходимы для обоснования выбора архитектурных решений при разработке высокопроизводительных вычислительных систем. Для конечных пользователей (разработчиков численных методов, инженеров по оптимизации) это полезно пониманием компромиссов между простотой реализации и производительностью. В выполнении работы заинтересована кафедра системного программирования.
+
+\section{Описание предлагаемого решения}
+
+Сравнение проводилось между двумя подходами к хранению разреженных матриц:
+
+\begin{itemize}
+    \item \textbf{C (COO Format)}: собственная реализация на языке C, использующая формат (COO) с тремя плоскими массивами (индексы строк, индексы столбцов, значения). Управление памятью осуществляется вручную через \texttt{malloc}/\texttt{free}, аллокация производится единовременно при создании матрицы. Алгоритмы оптимизированы под последовательный доступ к памяти.
+
+    \item \textbf{F\# (QuadTree)}: эталонная библиотека \texttt{QTreeFSharp}, использующая иерархическую структуру QuadTree. Операции реализованы рекурсивно, управление памятью автоматическое (Garbage Collector), что приводит к созданию множества временных объектов в процессе вычислений.
+\end{itemize}
+
+Реализация решения осуществлялась с использованием языка C (стандарт C11, компилятор GCC 13), языка F\# (.NET 8.0), системы сборки CMake для C-части и .NET SDK для F\#-части. Для автоматизации бенчмарков использовались скрипты на Python 3.
+
+\section{Эксперименты}
+
+\subsection*{Методика измерений}
+
+\begin{itemize}
+    \item \textbf{Наборы данных}: синтетические матрицы размеров $100{\times}100$, $500{\times}500$, $1000{\times}1000$, $2000{\times}2000$ с плотностью 5\%, 2\%, 1\%, 0.5\%; реальные матрицы из SuiteSparse Matrix Collection (\texttt{curtis54}, \texttt{cage4}, \texttt{lp\_afiro}).
+    \item \textbf{Векторы}: синтетические, генерируются случайно с плотностью 10\%, размер соответствует количеству столбцов матрицы.
+    \item \textbf{Инструменты замеров}:
+    \begin{itemize}
+        \item C: POSIX-таймер \texttt{gettimeofday()} с точностью до микросекунд, усреднение по 5 запускам.
+        \item F\#: для малых размеров (10--20) --- библиотека \texttt{BenchmarkDotNet} для получения статистики аллокаций и учёта влияния GC; для больших размеров (100--2000) --- \texttt{System.Diagnostics.Stopwatch}, так как код завершается с ошибкой до начала итераций BDN.
+    \end{itemize}
+    \item \textbf{Лимиты}: таймаут 120 с для C, 3600 с для F\#.
+    \item \textbf{Оформление}: все таблицы приведены к единому масштабу (секунды), точность унифицирована (6 знаков после запятой).
+\end{itemize}
+
+\subsection*{Проблема Stack Overflow в F\# реализации}
+
+При запуске на размерах $\ge 50$ эталонная библиотека \texttt{QTreeFSharp} завершается с ошибкой \texttt{StackOverflowException}.
+
+\textbf{Причина:} функция \texttt{Vector.traverse} (строка 314 в \texttt{Vector.fs}) использует \textbf{не-хвостовую рекурсию}:
+\begin{verbatim}
+let rec traverse coordinates pointer size =
+    let left, lCoordinates = traverse coordinates pointer halfSize
+    let right, rCoordinates = traverse lCoordinates (pointer+half) halfSize
+    mkNode left right, rCoordinates
+\end{verbatim}
+
+Результаты комбинируются \textbf{после} возврата из рекурсивных вызовов, поэтому компилятор F\# не может применить оптимизацию хвостовой рекурсии (TCO). При размере $\ge 50$ глубина стека превышает стандартный лимит .NET ($\sim$8 МБ).
+
+\textbf{Почему в других средах может работать:} возможно, используется иная версия .NET/JIT, Release-сборка с более агрессивными оптимизациями, или отличается структура входных данных (распределение ненулевых элементов влияет на глубину обхода QuadTree).
+
+\textbf{Влияние на бенчмаркинг:} \texttt{BenchmarkDotNet} требует стабильного многократного выполнения метода для расчёта статистики (warmup + pilot + main iterations). Если код падает на этапе подготовки, BDN не доходит до фазы измерения и фиксирует ошибку. Поэтому для больших размеров использовался \texttt{Stopwatch}, который фиксирует время успешного одиночного запуска.
+
+\subsection*{Результаты масштабных тестов}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Умножение матриц (mm): время выполнения в секундах}
+\begin{tabular}{lrrr}
+\toprule
+Датасет & C (с) & F\# (с) & Отношение \\
+\midrule
+Synthetic $100{\times}100$ ($d{=}0.05$) & 0.002500 & 0.225300 & $\sim$89$\times$ \\
+Synthetic $500{\times}500$ ($d{=}0.02$) & 0.520600 & 13.906800 & $\sim$27$\times$ \\
+Synthetic $1000{\times}1000$ ($d{=}0.01$) & 2.218700 & 62.165900 & $\sim$28$\times$ \\
+Synthetic $2000{\times}2000$ ($d{=}0.005$) & 9.235900 & Timeout & --- \\
+curtis54 ($54{\times}54$) & 0.002900 & 0.014600 & $\sim$5$\times$ \\
+cage4 ($9{\times}9$) & 0.000040 & 0.000560 & $\sim$15$\times$ \\
+lp\_afiro ($27{\times}51$) & 0.000230 & 0.007930 & $\sim$35$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Умножение матрицы на вектор (mv): время выполнения в секундах}
+\begin{tabular}{lrrr}
+\toprule
+Датасет & C (с) & F\# (с) & Отношение \\
+\midrule
+Synthetic $100{\times}100$ ($d{=}0.05$) & 0.000002 & 0.004000 & $\sim$2000$\times$ \\
+Synthetic $500{\times}500+$ & 0.000011 & StackOverflow & --- \\
+curtis54 & 0.000006 & 0.000474 & $\sim$79$\times$ \\
+cage4 & 0.000002 & 0.000080 & $\sim$40$\times$ \\
+lp\_afiro & 0.000003 & 0.000018 & $\sim$6$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{Детальный анализ аллокаций (BenchmarkDotNet, размеры 10--20)}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llllrr}
+\toprule
+Method & Size & Density & Language & Mean (с) & Allocated \\
+\midrule
+MatrixMultiply & 10 & 0.05 & C & 0.000001 & 60 B \\
+MatrixMultiply & 10 & 0.05 & F\# & 0.000034 & 62.51 KB \\
+MatrixVectorMultiply & 10 & 0.05 & C & 0.000001 & 60 B \\
+MatrixVectorMultiply & 10 & 0.05 & F\# & 0.000006 & 12.73 KB \\
+MatrixMultiply & 20 & 0.05 & C & 0.000008 & 240 B \\
+MatrixMultiply & 20 & 0.05 & F\# & 0.000229 & 403.71 KB \\
+MatrixVectorMultiply & 20 & 0.05 & C & 0.000002 & 240 B \\
+MatrixVectorMultiply & 20 & 0.05 & F\# & 0.000019 & 38.16 KB \\
+\bottomrule
+\end{tabular}
+\caption{Сравнение времени и потребления памяти. Память для C рассчитана как размер структуры COO (3 массива \texttt{int/int/float}), выделяемой один раз.}
+\end{table}
+
+\subsection*{Выводы из экспериментов}
+
+\begin{enumerate}
+    \item C-реализация опережает F\# в \textbf{5--2000 раз} на идентичных данных в зависимости от операции и размера матрицы.
+    \item Реализация на F\# создаёт тысячи временных объектов в куче (аллокации 62--403 КБ), что генерирует нагрузку на GC (Gen0: 10--65 на 1000 операций) и приводит к непредсказуемым паузам.
+    \item На размерах $\ge 50$ эталонная библиотека завершается с \texttt{StackOverflowException} из-за не-хвостовой рекурсии в функции \texttt{Vector.traverse}, тогда как C-реализация стабильно работает до $2000{\times}2000$.
+    \item Плоские форматы хранения (COO) обеспечивают предсказуемую линейную масштабируемость и отсутствие накладных расходов managed-среды.
+    \item \texttt{BenchmarkDotNet} успешно применён для малых размеров, где код стабилен; для больших размеров использован \texttt{Stopwatch}, так как код не выдерживает протокол многократных запусков BDN.
+\end{enumerate}
+
+\section{Заключение}
+
+В ходе выполнения работы получены следующие результаты:
+
+\begin{itemize}
+    \item Реализована собственная библиотека разреженной линейной алгебры на языке C в формате COO с операциями умножения матриц и матрицы на вектор.
+    \item Проведён сравнительный бенчмаркинг с эталонной реализацией на F\# (QuadTree) на синтетических и реальных матрицах.
+    \item Продемонстрировано преимущество плоских форматов хранения: ускорение в 5--2000 раз, отсутствие проблем с переполнением стека, предсказуемое потребление памяти.
+    \item Интегрирован BenchmarkDotNet для профессионального анализа F\#-кода, выявлены архитектурные ограничения рекурсивного подхода.
+    \item Исследована проблема Stack Overflow в эталонной библиотеке, даны рекомендации по диагностике различий в поведении кода в разных средах.
+\end{itemize}
+
+Материалы, иллюстрирующие выполнение работы, размещены по адресу: \url{https://github.com/rmnsmnsk/implementation-of-linear-algebra-primitives} (исходный код, скрипты бенчмарков, README).
+
+Техническая документация: \url{https://github.com/rmnsmnsk/implementation-of-linear-algebra-primitives/blob/main/README.md}.
+
+\end{document}
